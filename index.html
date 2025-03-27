@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EternaGallery-Image Upload DApp</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(to bottom right, #e5e7eb, #f3f4f6);
+            font-family: 'Inter', sans-serif;
+        }
+        .modern-shadow {
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.08);
+            transition: all 0.3s ease;
+        }
+        .modern-shadow:hover {
+            box-shadow: 0 7px 14px rgba(0, 0, 0, 0.1), 0 3px 6px rgba(0, 0, 0, 0.08);
+            transform: translateY(-2px);
+        }
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 1rem 1.5rem;
+            border-radius: 8px;
+            color: white;
+            z-index: 1000;
+            animation: slideIn 0.3s ease-out;
+        }
+        .toast-success { background-color: #10b981; }
+        .toast-error { background-color: #ef4444; }
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+    </style>
+</head>
+<body class="min-h-screen p-6">
+    <div class="max-w-4xl mx-auto">
+        <h1 class="text-4xl font-extrabold mb-8 text-center text-gray-800">EternaGallery</h1>
+        <h5 class="text-1xl  mb-8 text-center text-gray-800">Image Upload DApp(Polygon network)</h5>
+        <div id="wallet-section" class="mb-8 flex justify-center">
+            <button id="connectWallet" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-6 rounded-lg modern-shadow">
+                Connect MetaMask
+            </button>
+            <p id="account" class="mt-3 text-gray-600 text-sm"></p>
+        </div>
+
+        <div class="mb-8 bg-white p-6 rounded-xl modern-shadow">
+            <input id="title" type="text" placeholder="Image Title" class="w-full p-3 mb-4 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <input id="imageInput" type="file" accept="image/*" class="w-full p-3 mb-4 text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100">
+            <div class="mb-4 flex items-center space-x-4">
+                <label class="flex items-center">
+                    <input type="radio" name="compressOption" value="compress" class="mr-2" checked>
+                    <span class="text-gray-700">Compress (≤10KB)</span>
+                </label>
+                <label class="flex items-center">
+                    <input type="radio" name="compressOption" value="no-compress" class="mr-2">
+                    <span class="text-gray-700">No Compress</span>
+                </label>
+            </div>
+            <button id="uploadBtn" class="w-full bg-green-500 hover:bg-green-600 text-white font-semibold py-3 px-6 rounded-lg flex items-center justify-center modern-shadow">
+                <span id="uploadText">Upload Image</span>
+                <svg id="spinner" class="animate-spin h-5 w-5 mr-2 text-white hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+            </button>
+        </div>
+
+        <div class="mb-8 bg-white p-6 rounded-xl modern-shadow">
+            <input id="searchInput" type="text" placeholder="Search titles..." class="w-full p-3 mb-4 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <div class="flex space-x-4">
+                <input id="startDate" type="date" class="w-full p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Start Date">
+                <input id="endDate" type="date" class="w-full p-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="End Date">
+            </div>
+            <button id="searchByTimeBtn" class="mt-4 w-full bg-blue-500 hover:bg-blue-600 text-white font-semibold py-3 px-6 rounded-lg modern-shadow">Search by Time</button>
+        </div>
+
+        <div id="imageList" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <!-- Recent 5 or search results will be displayed here -->
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/web3@1.7.0/dist/web3.min.js"></script>
+    <script>
+        let web3;
+        let contract;
+        let account;
+        let allImages = [];
+
+        const contractAddress = "0xeb9e46EF6f478a30443dD153a61708309d133a47";
+        const contractABI = [
+            {
+                "inputs": [
+                    {"name": "_title", "type": "string"},
+                    {"name": "_imageData", "type": "string"}
+                ],
+                "name": "uploadImage",
+                "outputs": [],
+                "stateMutability": "nonpayable",
+                "type": "function"
+            },
+            {
+                "inputs": [],
+                "name": "getImageCount",
+                "outputs": [{"name": "", "type": "uint256"}],
+                "stateMutability": "view",
+                "type": "function"
+            },
+            {
+                "inputs": [{"name": "_index", "type": "uint256"}],
+                "name": "getImage",
+                "outputs": [
+                    {"name": "title", "type": "string"},
+                    {"name": "imageData", "type": "string"},
+                    {"name": "uploader", "type": "address"},
+                    {"name": "createdAt", "type": "uint256"}
+                ],
+                "stateMutability": "view",
+                "type": "function"
+            },
+            {
+                "inputs": [{"name": "_query", "type": "string"}],
+                "name": "searchImages",
+                "outputs": [{"name": "", "type": "uint256[]"}],
+                "stateMutability": "view",
+                "type": "function"
+            },
+            {
+                "inputs": [
+                    {"name": "_startTime", "type": "uint256"},
+                    {"name": "_endTime", "type": "uint256"}
+                ],
+                "name": "searchImagesByTime",
+                "outputs": [{"name": "", "type": "uint256[]"}],
+                "stateMutability": "view",
+                "type": "function"
+            }
+        ];
+
+        function showToast(message, type = 'success') {
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            setTimeout(() => {
+                toast.style.animation = 'slideOut 0.3s ease-in forwards';
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+        const styleSheet = document.createElement('style');
+        styleSheet.textContent = `
+            @keyframes slideOut {
+                from { transform: translateX(0); opacity: 1; }
+                to { transform: translateX(100%); opacity: 0; }
+            }
+        `;
+        document.head.appendChild(styleSheet);
+
+        async function init() {
+            if (window.ethereum) {
+                web3 = new Web3(window.ethereum);
+                contract = new web3.eth.Contract(contractABI, contractAddress);
+
+                document.getElementById('connectWallet').addEventListener('click', connectWallet);
+                document.getElementById('uploadBtn').addEventListener('click', uploadImage);
+                document.getElementById('searchInput').addEventListener('input', filterImages);
+                document.getElementById('searchByTimeBtn').addEventListener('click', searchByTime);
+                
+                await loadImages();
+            }
+        }
+
+        async function connectWallet() {
+            const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+            account = accounts[0];
+            document.getElementById('account').innerText = `Connected: ${account.slice(0, 6)}...${account.slice(-4)}`;
+        }
+
+        async function compressImage(file) {
+            return new Promise((resolve) => {
+                const img = new Image();
+                const reader = new FileReader();
+                
+                reader.onload = function(e) {
+                    img.src = e.target.result;
+                };
+
+                img.onload = function() {
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    
+                    let width = img.width;
+                    let height = img.height;
+                    const maxSize = 1024;
+                    const targetSize = 10 * 1024;
+
+                    if (width > height) {
+                        if (width > maxSize) {
+                            height = Math.round(height * maxSize / width);
+                            width = maxSize;
+                        }
+                    } else {
+                        if (height > maxSize) {
+                            width = Math.round(width * maxSize / height);
+                            height = maxSize;
+                        }
+                    }
+
+                    canvas.width = width;
+                    canvas.height = height;
+                    ctx.drawImage(img, 0, 0, width, height);
+
+                    let quality = 0.9;
+                    let dataUrl = canvas.toDataURL('image/jpeg', quality);
+                    
+                    while (dataUrl.length > targetSize && quality > 0.05) {
+                        quality -= 0.1;
+                        dataUrl = canvas.toDataURL('image/jpeg', quality);
+                    }
+
+                    while (dataUrl.length > targetSize && width > 50 && height > 50) {
+                        const scale = Math.sqrt(targetSize / dataUrl.length) * 0.9;
+                        width = Math.round(width * scale);
+                        height = Math.round(height * scale);
+                        canvas.width = width;
+                        canvas.height = height;
+                        ctx.drawImage(img, 0, 0, width, height);
+                        dataUrl = canvas.toDataURL('image/jpeg', 0.5);
+                    }
+
+                    resolve(dataUrl);
+                };
+
+                reader.readAsDataURL(file);
+            });
+        }
+
+        async function processImage(file, shouldCompress) {
+            if (shouldCompress) {
+                return await compressImage(file);
+            } else {
+                return new Promise((resolve) => {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        resolve(e.target.result);
+                    };
+                    reader.readAsDataURL(file);
+                });
+            }
+        }
+
+        async function uploadImage() {
+            const title = document.getElementById('title').value;
+            const file = document.getElementById('imageInput').files[0];
+            const uploadBtn = document.getElementById('uploadBtn');
+            const uploadText = document.getElementById('uploadText');
+            const spinner = document.getElementById('spinner');
+            const shouldCompress = document.querySelector('input[name="compressOption"]:checked').value === 'compress';
+
+            uploadText.classList.add('hidden');
+            spinner.classList.remove('hidden');
+            uploadBtn.disabled = true;
+            uploadBtn.classList.add('cursor-not-allowed', 'opacity-50');
+
+            try {
+                const dataUrl = await processImage(file, shouldCompress);
+                const binary = atob(dataUrl.split(',')[1]);
+                const array = new Uint8Array(binary.length);
+                for (let i = 0; i < binary.length; i++) {
+                    array[i] = binary.charCodeAt(i);
+                }
+                const asciiData = btoa(String.fromCharCode.apply(null, array));
+                
+                await contract.methods.uploadImage(title, asciiData)
+                    .send({ from: account })
+                    .then(() => {
+                        showToast('Image uploaded successfully!', 'success');
+                        loadImages();
+                    });
+            } catch (err) {
+                console.error(err);
+                showToast('Upload failed: ' + err.message, 'error');
+            } finally {
+                uploadText.classList.remove('hidden');
+                spinner.classList.add('hidden');
+                uploadBtn.disabled = false;
+                uploadBtn.classList.remove('cursor-not-allowed', 'opacity-50');
+            }
+        }
+
+        async function loadImages() {
+            allImages = [];
+            const imageList = document.getElementById('imageList');
+            imageList.innerHTML = '';
+            
+            const count = await contract.methods.getImageCount().call();
+            const startIndex = Math.max(0, count - 5);
+            for (let i = startIndex; i < count; i++) {
+                const image = await contract.methods.getImage(i).call();
+                allImages.push({
+                    title: image[0],
+                    imageData: image[1],
+                    uploader: image[2],
+                    createdAt: Number(image[3]) 
+                });
+            }
+            
+            displayImages(allImages);
+        }
+
+        async function filterImages() {
+            const searchTerm = document.getElementById('searchInput').value.trim();
+            const imageList = document.getElementById('imageList');
+            imageList.innerHTML = '';
+
+            if (searchTerm === '') {
+                await loadImages();
+            } else {
+                try {
+                    const matchingIndices = await contract.methods.searchImages(searchTerm).call();
+                    const filteredImages = [];
+
+                    for (let i = 0; i < matchingIndices.length; i++) {
+                        const image = await contract.methods.getImage(matchingIndices[i]).call();
+                        filteredImages.push({
+                            title: image[0],
+                            imageData: image[1],
+                            uploader: image[2],
+                            createdAt: Number(image[3])
+                        });
+                    }
+
+                    displayImages(filteredImages);
+                } catch (err) {
+                    console.error(err);
+                    showToast('Search failed: ' + err.message, 'error');
+                }
+            }
+        }
+
+        async function searchByTime() {
+            const startDate = document.getElementById('startDate').value;
+            const endDate = document.getElementById('endDate').value;
+            const imageList = document.getElementById('imageList');
+            imageList.innerHTML = '';
+
+            if (!startDate || !endDate) {
+                showToast('Please select both start and end dates', 'error');
+                return;
+            }
+
+            try {
+                const startTime = Math.floor(new Date(startDate).getTime() / 1000);  
+                const endTime = Math.floor(new Date(endDate).getTime() / 1000 + 86399);  
+                const matchingIndices = await contract.methods.searchImagesByTime(startTime, endTime).call();
+                const filteredImages = [];
+
+                for (let i = 0; i < matchingIndices.length; i++) {
+                    const image = await contract.methods.getImage(matchingIndices[i]).call();
+                    filteredImages.push({
+                        title: image[0],
+                        imageData: image[1],
+                        uploader: image[2],
+                        createdAt: Number(image[3])
+                    });
+                }
+
+                displayImages(filteredImages);
+            } catch (err) {
+                console.error(err);
+                showToast('Time search failed: ' + err.message, 'error');
+            }
+        }
+
+        function displayImages(images) {
+            const imageList = document.getElementById('imageList');
+            imageList.innerHTML = '';
+            
+            images.forEach(image => {
+                const div = document.createElement('div');
+                div.className = 'bg-white p-5 rounded-xl modern-shadow cursor-pointer hover:bg-gray-50';
+                const date = new Date(image.createdAt * 1000).toLocaleDateString(); 
+                div.innerHTML = `
+                    <h3 class="font-semibold text-lg text-gray-800">${image.title}</h3>
+                    <p class="text-sm text-gray-500 mt-1">By: ${image.uploader.slice(0, 6)}...${image.uploader.slice(-4)}</p>
+                    <p class="text-sm text-gray-500 mt-1">Created: ${date}</p>
+                `;
+                div.addEventListener('click', () => {
+                    const binary = atob(image.imageData);
+                    const array = new Uint8Array(binary.length);
+                    for (let i = 0; i < binary.length; i++) {
+                        array[i] = binary.charCodeAt(i);
+                    }
+                    const blob = new Blob([array], { type: 'image/jpeg' });
+                    const url = URL.createObjectURL(blob);
+                    
+                    const win = window.open('');
+                    win.document.write(`<img src="${url}" alt="${image.title}" class="max-w-full h-auto">`);
+                });
+                imageList.appendChild(div);
+            });
+        }
+
+        window.addEventListener('load', init);
+    </script>
+</body>
+</html>
